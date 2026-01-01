@@ -38,7 +38,6 @@ const App: React.FC = () => {
   const segmentRecorderRef = useRef<MediaRecorder | null>(null);
 
   useEffect(() => {
-    // 初始化時預載所有音效
     shutterSoundRef.current = createSFX(SHUTTER_SOUND_URL);
     curtainSoundRef.current = createSFX(CURTAIN_SOUND_URL);
     printSoundRef.current = createSFX(PRINT_SOUND_URL);
@@ -102,7 +101,6 @@ const App: React.FC = () => {
         sfx.currentTime = 0;
       }).catch(e => console.warn("Audio unlock failed", e));
     };
-
     unlock(curtainSoundRef.current);
     unlock(shutterSoundRef.current);
     unlock(printSoundRef.current);
@@ -139,7 +137,6 @@ const App: React.FC = () => {
     const stream = streamRef.current;
     videoSegmentsRef.current = [];
     const captured: string[] = [];
-    
     const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
 
     try {
@@ -195,59 +192,68 @@ const App: React.FC = () => {
     canvas.width = frameWidth + (margin * 2);
     canvas.height = (frameHeight * 4) + (spacing * 3) + margin + bottomPadding;
 
+    // 1. 建立並等待所有影片載入與播放
     const videos = await Promise.all(videoSegmentsRef.current.map(blob => {
       return new Promise<HTMLVideoElement>((resolve) => {
         const v = document.createElement('video');
         v.src = URL.createObjectURL(blob);
         v.muted = true; v.loop = true; v.playsInline = true;
-        v.onloadedmetadata = () => v.play().then(() => resolve(v));
+        // 關鍵：確保影片狀態已就緒
+        v.oncanplay = () => {
+            v.play().then(() => resolve(v));
+        };
+        v.load();
       });
     }));
 
+    // 2. 準備錄製器
     const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-    // 降低影格率以提升行動裝置相容性
-    const stream = canvas.captureStream(24);
+    const stream = canvas.captureStream(24); // 穩定的 24fps
     const chunks: Blob[] = [];
     const recorder = new MediaRecorder(stream, { 
       mimeType,
-      videoBitsPerSecond: 2500000 // 限制流量以提升相容性
+      videoBitsPerSecond: 1500000 
     });
-    
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-    
-    const filterString = GET_FILTER_CSS(selectedFilter);
 
-    // 輔助函式：確保影片正確填充區域 (Cover)
+    // 3. 渲染循環優化 (手動濾鏡模擬，因為部分手機 captureStream 對 ctx.filter 不友善)
     const drawFrame = (v: HTMLVideoElement, dx: number, dy: number, dw: number, dh: number) => {
-        const sw = v.videoWidth;
-        const sh = v.videoHeight;
+        const sw = v.videoWidth; const sh = v.videoHeight;
         if (!sw || !sh) return;
-        const dr = dw / dh;
-        const sr = sw / sh;
+        const dr = dw / dh; const sr = sw / sh;
         let sWidth, sHeight, sx, sy;
-        if (sr > dr) {
-            sWidth = sh * dr; sHeight = sh; sx = (sw - sWidth) / 2; sy = 0;
-        } else {
-            sWidth = sw; sHeight = sw / dr; sx = 0; sy = (sh - sHeight) / 2;
-        }
+        if (sr > dr) { sWidth = sh * dr; sHeight = sh; sx = (sw - sWidth) / 2; sy = 0; }
+        else { sWidth = sw; sHeight = sw / dr; sx = 0; sy = (sh - sHeight) / 2; }
+        
         ctx.drawImage(v, sx, sy, sWidth, sHeight, dx, dy, dw, dh);
+
+        // 手動覆蓋濾鏡效果 (模擬 B&W 或 Sepia)
+        if (selectedFilter === FilterType.BERLIN_BW) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'saturation';
+            ctx.fillStyle = 'black';
+            ctx.fillRect(dx, dy, dw, dh);
+            ctx.globalCompositeOperation = 'contrast';
+            ctx.fillStyle = 'rgba(0,0,0,0.1)';
+            ctx.fillRect(dx, dy, dw, dh);
+            ctx.restore();
+        } else if (selectedFilter === FilterType.SEPIA) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'color';
+            ctx.fillStyle = 'rgba(112, 66, 20, 0.4)';
+            ctx.fillRect(dx, dy, dw, dh);
+            ctx.restore();
+        }
     };
 
-    let isRecording = true;
-    const renderLoop = () => {
-      if (!isRecording) return;
-      
-      // 清背景
+    const render = () => {
+      // 繪製背景 (白色紙張)
       ctx.fillStyle = '#fdfdfd';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
       videos.forEach((v, i) => {
         const y = margin + (i * (frameHeight + spacing));
         ctx.save();
-        
-        // 確保濾鏡被套用 (CSS filter string)
-        ctx.filter = filterString;
-        
         if (isMirrored) {
           ctx.translate(margin + frameWidth, y);
           ctx.scale(-1, 1);
@@ -256,32 +262,34 @@ const App: React.FC = () => {
           drawFrame(v, margin, y, frameWidth, frameHeight);
         }
         ctx.restore();
-        
-        // 外框線
         ctx.strokeStyle = '#222'; 
         ctx.lineWidth = 1;
         ctx.strokeRect(margin, y, frameWidth, frameHeight);
       });
       
-      // 底部文字
       ctx.fillStyle = '#888'; 
       ctx.font = '16px "Share Tech Mono"';
       ctx.fillText('PHOTOAUTOMAT // ANIMATED STRIP', margin, canvas.height - 40);
-      
-      requestAnimationFrame(renderLoop);
     };
 
-    // 先畫一格「預熱」Canvas，避免 CaptureStream 抓到空白
-    renderLoop();
-    
-    // 稍微延遲錄製開始
+    // 4. 啟動錄製流程
+    render(); // 先畫第一格
     setTimeout(() => {
         recorder.start();
-    }, 100);
+        let isRecording = true;
+        const loop = () => {
+          if (!isRecording) return;
+          render();
+          requestAnimationFrame(loop);
+        };
+        loop();
 
-    await new Promise(r => setTimeout(r, 4000));
-    isRecording = false;
-    recorder.stop();
+        // 錄製 4 秒後停止
+        setTimeout(() => {
+          isRecording = false;
+          recorder.stop();
+        }, 4000);
+    }, 200); // 稍微延遲以確保 Canvas 狀態穩定
 
     return new Promise<void>((resolve) => {
       recorder.onstop = () => {
