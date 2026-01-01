@@ -99,7 +99,6 @@ const App: React.FC = () => {
   };
 
   const handleEnterBooth = async () => {
-    // 觸發門簾拉開時的微弱震動
     triggerHaptic(20);
 
     const unlock = (sfx: HTMLAudioElement | null) => {
@@ -138,6 +137,16 @@ const App: React.FC = () => {
 
   const startShootingSequence = async () => {
     if (!streamRef.current) return;
+    
+    // 重要：在使用者點擊按鈕的瞬間再次預熱快門音效，解決瀏覽器自動播放限制
+    if (shutterSoundRef.current) {
+      const sfx = shutterSoundRef.current;
+      sfx.play().then(() => {
+        sfx.pause();
+        sfx.currentTime = 0;
+      }).catch(() => {});
+    }
+
     isCancelledRef.current = false;
     isPausedRef.current = false;
     setIsPausedUI(false);
@@ -168,6 +177,8 @@ const App: React.FC = () => {
         }
         
         setState(BoothState.SHUTTER);
+        // 加入極短延遲確保狀態切換與音效同步
+        await new Promise(r => setTimeout(r, 50));
         if (shutterSoundRef.current) playSFX(shutterSoundRef.current, 0.9);
 
         setIsFlashActive(true);
@@ -330,7 +341,6 @@ const App: React.FC = () => {
         await createAnimatedStrip();
         setTimeout(() => {
           setState(BoothState.RESULT);
-          // 照片落下時觸發較強震動
           triggerHaptic(50);
           if (printSoundRef.current) playSFX(printSoundRef.current, 1.0);
         }, 3500);
@@ -419,21 +429,21 @@ const App: React.FC = () => {
             )}
 
             {state === BoothState.READY && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 md:gap-10 bg-black/80 backdrop-blur-xl p-6 md:p-12 text-center z-[80] animate-fade-in">
+              <div className="absolute inset-0 flex flex-col items-center justify-around bg-black/80 backdrop-blur-xl p-4 md:p-10 text-center z-[80] animate-fade-in overflow-hidden">
                  {isStartingCamera ? (
                     <div className="flex flex-col items-center gap-6">
                         <Loader2 size={48} className="text-white animate-spin opacity-50" />
                         <p className="elegant-font italic text-white/50 text-xl tracking-widest">Warming up lens...</p>
                     </div>
                  ) : (
-                    <>
-                        <h2 className="elegant-font italic text-white text-2xl md:text-5xl tracking-[0.1em] uppercase leading-tight">Style Selection</h2>
+                    <div className="flex flex-col items-center justify-around w-full h-full py-4">
+                        <h2 className="elegant-font italic text-white text-xl md:text-4xl tracking-[0.1em] uppercase">Style Selection</h2>
                         
                         <div className="grid grid-cols-3 gap-2 md:gap-4 w-full max-w-lg md:max-w-2xl px-2">
                         {Object.values(FilterType).map((fid) => (
                             <button
                                 key={fid} onClick={(e) => { e.stopPropagation(); setSelectedFilter(fid); }}
-                                className={`py-2 md:py-6 px-1 md:px-2 border-2 transition-all clean-font text-[9px] md:text-[11px] uppercase font-black min-h-[50px] md:min-h-[72px] flex items-center justify-center leading-tight tracking-tighter ${
+                                className={`py-2 md:py-6 px-1 md:px-2 border-2 transition-all clean-font text-[9px] md:text-[11px] uppercase font-black min-h-[44px] md:min-h-[72px] flex items-center justify-center leading-tight tracking-tighter ${
                                 selectedFilter === fid ? 'bg-white text-black border-white scale-105 shadow-2xl' : 'bg-black/40 text-white/50 border-white/20 hover:border-white/50'
                                 }`}
                             >
@@ -444,12 +454,12 @@ const App: React.FC = () => {
 
                         <button 
                         onClick={(e) => { e.stopPropagation(); startShootingSequence(); }}
-                        className="bg-red-600 hover:bg-red-500 text-white px-8 md:px-16 py-3 md:py-8 rounded-full flex items-center gap-3 md:gap-4 transition-all active:scale-95 shadow-[0_0_40px_rgba(220,38,38,0.6)] group"
+                        className="bg-red-600 hover:bg-red-500 text-white px-8 md:px-16 py-3 md:py-6 rounded-full flex items-center gap-3 md:gap-4 transition-all active:scale-95 shadow-[0_0_40px_rgba(220,38,38,0.6)] group mt-2"
                         >
-                        <Camera size={28} className="group-hover:rotate-12 transition-transform" />
-                        <span className="elegant-font font-bold text-lg md:text-3xl uppercase tracking-[0.15em]">Start Session</span>
+                        <Camera size={24} className="group-hover:rotate-12 transition-transform md:w-8 md:h-8" />
+                        <span className="elegant-font font-bold text-base md:text-2xl uppercase tracking-[0.15em]">Start Session</span>
                         </button>
-                    </>
+                    </div>
                  )}
               </div>
             )}
