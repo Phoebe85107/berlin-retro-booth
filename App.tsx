@@ -42,6 +42,12 @@ const App: React.FC = () => {
     printSoundRef.current = createSFX(PRINT_SOUND_URL);
   }, []);
 
+  const triggerHaptic = (ms: number) => {
+    if ('vibrate' in navigator) {
+      navigator.vibrate(ms);
+    }
+  };
+
   const startCamera = async () => {
     if (isStartingCamera) return null;
     setIsStartingCamera(true);
@@ -93,6 +99,9 @@ const App: React.FC = () => {
   };
 
   const handleEnterBooth = async () => {
+    // 觸發門簾拉開時的微弱震動
+    triggerHaptic(20);
+
     const unlock = (sfx: HTMLAudioElement | null) => {
       if (!sfx) return;
       sfx.play().then(() => {
@@ -183,12 +192,10 @@ const App: React.FC = () => {
   const createAnimatedStrip = async () => {
     if (videoSegmentsRef.current.length < 4 || !compositeCanvasRef.current) return;
     
-    // 1. 設定錄製與緩衝 Canvas
     const canvas = compositeCanvasRef.current;
-    const ctx = canvas.getContext('2d', { alpha: false }); // 關閉透明度提升效能
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    // 建立緩衝 Canvas 以防止閃爍
     const bufferCanvas = document.createElement('canvas');
     const bctx = bufferCanvas.getContext('2d', { alpha: false });
     if (!bctx) return;
@@ -201,7 +208,6 @@ const App: React.FC = () => {
     canvas.width = bufferCanvas.width = totalWidth;
     canvas.height = bufferCanvas.height = totalHeight;
 
-    // 2. 建立影片元素並「強制」掛載到 DOM (iOS 必需)
     const videoContainer = document.createElement('div');
     videoContainer.style.position = 'fixed';
     videoContainer.style.top = '-1000px';
@@ -225,7 +231,6 @@ const App: React.FC = () => {
       });
     }));
 
-    // 3. 準備錄製器
     const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
     const stream = canvas.captureStream(24);
     const chunks: Blob[] = [];
@@ -235,7 +240,6 @@ const App: React.FC = () => {
     });
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
-    // 4. 繪製邏輯
     const drawFrameToBuffer = (v: HTMLVideoElement, dx: number, dy: number, dw: number, dh: number) => {
         const sw = v.videoWidth; const sh = v.videoHeight;
         if (!sw || !sh) return;
@@ -246,13 +250,11 @@ const App: React.FC = () => {
         
         bctx.drawImage(v, sx, sy, sWidth, sHeight, dx, dy, dw, dh);
 
-        // 手動模擬濾鏡 (對 iOS 錄製器最友好的方式)
         if (selectedFilter === FilterType.BERLIN_BW) {
             bctx.save();
             bctx.globalCompositeOperation = 'saturation';
             bctx.fillStyle = 'black';
             bctx.fillRect(dx, dy, dw, dh);
-            // Fix: Change invalid 'contrast' to 'overlay' to satisfy TypeScript constraints.
             bctx.globalCompositeOperation = 'overlay';
             bctx.fillStyle = 'rgba(0,0,0,0.1)';
             bctx.fillRect(dx, dy, dw, dh);
@@ -289,12 +291,9 @@ const App: React.FC = () => {
       bctx.fillStyle = '#888'; 
       bctx.font = '16px "Share Tech Mono"';
       bctx.fillText('PHOTOAUTOMAT // ANIMATED STRIP', margin, totalHeight - 40);
-
-      // 最後一步：將緩衝內容一次性貼回主 Canvas (防閃爍關鍵)
       ctx.drawImage(bufferCanvas, 0, 0);
     };
 
-    // 5. 啟動循環與錄製
     let isRecording = true;
     const loop = () => {
       if (!isRecording) return;
@@ -302,7 +301,7 @@ const App: React.FC = () => {
       requestAnimationFrame(loop);
     };
 
-    performRender(); // 預熱
+    performRender(); 
     setTimeout(() => {
         recorder.start();
         loop();
@@ -316,7 +315,6 @@ const App: React.FC = () => {
       recorder.onstop = () => {
         const blob = new Blob(chunks, { type: mimeType });
         setRecordedVideoUrl(URL.createObjectURL(blob));
-        // 清理
         videos.forEach(v => { v.pause(); URL.revokeObjectURL(v.src); });
         if (document.body.contains(videoContainer)) document.body.removeChild(videoContainer);
         resolve();
@@ -332,6 +330,8 @@ const App: React.FC = () => {
         await createAnimatedStrip();
         setTimeout(() => {
           setState(BoothState.RESULT);
+          // 照片落下時觸發較強震動
+          triggerHaptic(50);
           if (printSoundRef.current) playSFX(printSoundRef.current, 1.0);
         }, 3500);
       };
@@ -419,7 +419,7 @@ const App: React.FC = () => {
             )}
 
             {state === BoothState.READY && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-xl p-4 md:p-10 text-center z-[80] animate-fade-in">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 md:gap-10 bg-black/80 backdrop-blur-xl p-6 md:p-12 text-center z-[80] animate-fade-in">
                  {isStartingCamera ? (
                     <div className="flex flex-col items-center gap-6">
                         <Loader2 size={48} className="text-white animate-spin opacity-50" />
@@ -427,9 +427,9 @@ const App: React.FC = () => {
                     </div>
                  ) : (
                     <>
-                        <h2 className="elegant-font italic text-white text-2xl md:text-5xl mb-4 md:mb-10 tracking-[0.1em] uppercase">Style Selection</h2>
+                        <h2 className="elegant-font italic text-white text-2xl md:text-5xl tracking-[0.1em] uppercase leading-tight">Style Selection</h2>
                         
-                        <div className="grid grid-cols-3 gap-2 md:gap-4 mb-8 md:mb-14 w-full max-w-lg md:max-w-2xl px-2">
+                        <div className="grid grid-cols-3 gap-2 md:gap-4 w-full max-w-lg md:max-w-2xl px-2">
                         {Object.values(FilterType).map((fid) => (
                             <button
                                 key={fid} onClick={(e) => { e.stopPropagation(); setSelectedFilter(fid); }}
@@ -444,7 +444,7 @@ const App: React.FC = () => {
 
                         <button 
                         onClick={(e) => { e.stopPropagation(); startShootingSequence(); }}
-                        className="bg-red-600 hover:bg-red-500 text-white px-8 md:px-16 py-4 md:py-8 rounded-full flex items-center gap-3 md:gap-4 transition-all active:scale-95 shadow-[0_0_40px_rgba(220,38,38,0.6)] group"
+                        className="bg-red-600 hover:bg-red-500 text-white px-8 md:px-16 py-3 md:py-8 rounded-full flex items-center gap-3 md:gap-4 transition-all active:scale-95 shadow-[0_0_40px_rgba(220,38,38,0.6)] group"
                         >
                         <Camera size={28} className="group-hover:rotate-12 transition-transform" />
                         <span className="elegant-font font-bold text-lg md:text-3xl uppercase tracking-[0.15em]">Start Session</span>
