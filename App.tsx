@@ -38,6 +38,7 @@ const App: React.FC = () => {
   const segmentRecorderRef = useRef<MediaRecorder | null>(null);
 
   useEffect(() => {
+    // 預載音效
     shutterSoundRef.current = createSFX(SHUTTER_SOUND_URL);
     curtainSoundRef.current = createSFX(CURTAIN_SOUND_URL);
     printSoundRef.current = createSFX(PRINT_SOUND_URL);
@@ -94,11 +95,25 @@ const App: React.FC = () => {
   };
 
   const handleEnterBooth = async () => {
-    const resumeAudio = () => {
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        if (ctx.state === 'suspended') ctx.resume();
+    // --- 關鍵：行動裝置音效解鎖邏輯 ---
+    const unlockAudio = () => {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      // 在使用者點擊的當下，靜音播放並暫停所有音效物件，獲取系統權限
+      [shutterSoundRef.current, curtainSoundRef.current, printSoundRef.current].forEach(sfx => {
+        if (sfx) {
+          const originalVolume = sfx.volume;
+          sfx.volume = 0;
+          sfx.play().then(() => {
+            sfx.pause();
+            sfx.volume = originalVolume;
+            sfx.currentTime = 0;
+          }).catch(() => {});
+        }
+      });
     };
-    resumeAudio();
+    unlockAudio();
 
     if (curtainSoundRef.current) playSFX(curtainSoundRef.current, 0.7);
     const stream = await startCamera();
@@ -252,8 +267,9 @@ const App: React.FC = () => {
         setFinalImage(strip);
         await createAnimatedStrip();
         setTimeout(() => {
-          if (printSoundRef.current) playSFX(printSoundRef.current, 1.0);
+          // 在此處切換至 RESULT 狀態並播放列印聲
           setState(BoothState.RESULT);
+          if (printSoundRef.current) playSFX(printSoundRef.current, 1.0);
         }, 3500);
       };
       generate();
