@@ -55,7 +55,6 @@ const App: React.FC = () => {
       return stream;
     } catch (err) {
       console.error("Camera access error:", err);
-      alert("Please enable camera permissions to start your photo session.");
       return null;
     } finally {
       setIsStartingCamera(false);
@@ -95,7 +94,6 @@ const App: React.FC = () => {
   };
 
   const handleEnterBooth = async () => {
-    // 解決部分瀏覽器音效策略
     const resumeAudio = () => {
         const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
         if (ctx.state === 'suspended') ctx.resume();
@@ -134,19 +132,14 @@ const App: React.FC = () => {
     videoSegmentsRef.current = [];
     const captured: string[] = [];
     
-    const getMimeType = () => {
-      const types = ['video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
-      for (const t of types) if (MediaRecorder.isTypeSupported(t)) return t;
-      return '';
-    };
-    const mimeType = getMimeType();
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
 
     try {
       for (let i = 0; i < 4; i++) {
         setState(BoothState.COUNTDOWN);
         for (let c = 3; c > 0; c--) {
           setCountdown(c);
-          if (c === 3 && mimeType) {
+          if (c === 3) {
             const chunks: Blob[] = [];
             const rec = new MediaRecorder(stream, { mimeType });
             rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
@@ -186,7 +179,7 @@ const App: React.FC = () => {
   const createAnimatedStrip = async () => {
     if (videoSegmentsRef.current.length < 4 || !compositeCanvasRef.current) return;
     const canvas = compositeCanvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
     const frameWidth = 480; const frameHeight = 360;
@@ -209,14 +202,16 @@ const App: React.FC = () => {
     const recorder = new MediaRecorder(stream, { mimeType });
     recorder.ondataavailable = (e) => chunks.push(e.data);
     
+    const filterString = GET_FILTER_CSS(selectedFilter);
+
     const renderLoop = () => {
       if (recorder.state === 'inactive') return;
       ctx.fillStyle = '#fdfdfd';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       videos.forEach((v, i) => {
-        ctx.save();
-        ctx.filter = GET_FILTER_CSS(selectedFilter);
         const y = margin + (i * (frameHeight + spacing));
+        ctx.save();
+        ctx.filter = filterString;
         if (isMirrored) {
           ctx.translate(margin + frameWidth, y);
           ctx.scale(-1, 1);
@@ -225,14 +220,18 @@ const App: React.FC = () => {
           ctx.drawImage(v, margin, y, frameWidth, frameHeight);
         }
         ctx.restore();
-        ctx.strokeStyle = '#222'; ctx.strokeRect(margin, y, frameWidth, frameHeight);
+        ctx.strokeStyle = '#222'; 
+        ctx.lineWidth = 1;
+        ctx.strokeRect(margin, y, frameWidth, frameHeight);
       });
-      ctx.fillStyle = '#888'; ctx.font = '16px "Share Tech Mono"';
-      ctx.fillText('PHOTOAUTOMAT // ANIMATED', margin, canvas.height - 40);
+      ctx.fillStyle = '#888'; 
+      ctx.font = '16px "Share Tech Mono"';
+      ctx.fillText('PHOTOAUTOMAT // ANIMATED STRIP', margin, canvas.height - 40);
       requestAnimationFrame(renderLoop);
     };
 
-    recorder.start(); renderLoop();
+    recorder.start(); 
+    renderLoop();
     await new Promise(r => setTimeout(r, 4000));
     recorder.stop();
 
@@ -266,7 +265,6 @@ const App: React.FC = () => {
     const link = document.createElement('a');
     link.href = url;
     link.download = filename;
-    link.target = '_blank';
     document.body.appendChild(link);
     try {
       link.click();
@@ -276,7 +274,7 @@ const App: React.FC = () => {
     setTimeout(() => {
       if (document.body.contains(link)) document.body.removeChild(link);
       setIsDownloading(null);
-    }, 1500);
+    }, 2000);
   };
 
   const isInside = state === BoothState.READY || state === BoothState.COUNTDOWN || state === BoothState.SHUTTER || state === BoothState.DEVELOPING;
@@ -287,7 +285,7 @@ const App: React.FC = () => {
       <canvas ref={compositeCanvasRef} className="hidden" />
       
       {(state === BoothState.EXTERIOR || state === BoothState.ENTERING || state === BoothState.RESULT) && (
-        <div className={`transition-all duration-1000 ${state === BoothState.RESULT ? 'opacity-85 blur-[3px] scale-100' : 'opacity-100 scale-100'}`}>
+        <div className={`transition-all duration-1000 ${state === BoothState.RESULT ? 'opacity-85 blur-[5px] scale-105' : 'opacity-100 scale-100'}`}>
           <BoothExterior 
             onEnter={handleEnterBooth} 
             isOpening={state === BoothState.ENTERING} 
@@ -298,9 +296,9 @@ const App: React.FC = () => {
       )}
 
       {state === BoothState.RESULT && finalImage && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center pointer-events-none overflow-hidden pb-[15vh]">
+        <div className="fixed inset-0 z-[150] flex items-center justify-center pointer-events-none overflow-hidden pb-[22vh] md:pb-[25vh]">
              <div className="relative animate-[centerPhysicalDrop_4.5s_cubic-bezier(0.2, 0.8, 0.2, 1)_forwards]">
-                <img src={finalImage} alt="Strip" className="h-[65vh] md:h-[75vh] w-auto border-[4px] border-white shadow-[0_60px_180px_rgba(0,0,0,1)] pointer-events-auto" style={{ transform: 'rotate(-4deg)' }} />
+                <img src={finalImage} alt="Strip" className="h-[55vh] md:h-[70vh] w-auto border-[6px] border-white shadow-[0_80px_200px_rgba(0,0,0,1)] pointer-events-auto" style={{ transform: 'rotate(-4deg)' }} />
                 <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent pointer-events-none"></div>
              </div>
         </div>
@@ -310,25 +308,25 @@ const App: React.FC = () => {
         <div className="relative w-full h-full max-w-5xl md:h-auto md:aspect-[16/11] bg-[#141414] p-4 md:p-10 flex flex-col items-center justify-center shadow-[0_60px_120px_rgba(0,0,0,1)] border border-white/5 animate-[zoomIn_0.6s_ease-out] z-[100]">
           
           {(isShooting || state === BoothState.READY) && (
-            <div className="absolute top-4 md:top-8 right-4 md:right-12 flex items-center gap-4 z-[300]">
+            <div className="absolute top-6 right-6 md:top-10 md:right-14 flex items-center gap-4 z-[300]">
                {isShooting && (
                  <button 
                   onClick={(e) => { e.stopPropagation(); isPausedRef.current = !isPausedRef.current; setIsPausedUI(isPausedRef.current); }}
-                  className={`p-3 md:p-4 rounded-full border transition-all active:scale-90 shadow-lg ${isPausedUI ? 'bg-white text-black border-white' : 'bg-white/5 text-white border-white/20 hover:bg-white/10'}`}
+                  className={`w-12 h-12 md:w-16 md:h-16 flex items-center justify-center rounded-full border-2 transition-all active:scale-90 shadow-2xl flex-shrink-0 ${isPausedUI ? 'bg-white text-black border-white' : 'bg-black/60 text-white border-white/30 hover:bg-white/10'}`}
                  >
-                   {isPausedUI ? <Play size={20} fill="currentColor" /> : <Pause size={20} fill="currentColor" />}
+                   {isPausedUI ? <Play size={24} fill="currentColor" /> : <Pause size={24} fill="currentColor" />}
                  </button>
                )}
                <button 
                 onClick={() => { isCancelledRef.current = true; resetBooth(); }}
-                className="p-3 md:p-4 rounded-full bg-red-600/20 text-red-500 border border-red-500/30 hover:bg-red-600 hover:text-white transition-all active:scale-90 shadow-lg"
+                className="w-12 h-12 md:w-16 md:h-16 flex items-center justify-center rounded-full bg-red-600/20 text-red-500 border-2 border-red-500/30 hover:bg-red-600 hover:text-white transition-all active:scale-90 shadow-2xl flex-shrink-0"
                >
-                 <X size={20} />
+                 <X size={24} />
                </button>
             </div>
           )}
 
-          <div className="relative w-full aspect-[4/3] max-h-[70vh] bg-black overflow-hidden border-[8px] md:border-[18px] border-white shadow-inner flex items-center justify-center">
+          <div className="relative w-full aspect-[4/3] max-h-[65vh] bg-black overflow-hidden border-[10px] md:border-[20px] border-white shadow-inner flex items-center justify-center">
             <video 
               ref={videoRef} autoPlay muted playsInline 
               className={`w-full h-full object-cover transition-all duration-300 ${isMirrored ? 'scale-x-[-1]' : 'scale-x-[1]'} ${isPausedUI ? 'grayscale brightness-50' : ''}`}
@@ -336,28 +334,28 @@ const App: React.FC = () => {
             />
             
             {isPausedUI && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-[150]">
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-md z-[150]">
                  <div className="elegant-font italic text-white text-4xl tracking-[0.2em] animate-pulse">PAUSED</div>
               </div>
             )}
 
             {state === BoothState.READY && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 backdrop-blur-md p-6 text-center z-[80] animate-fade-in">
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-xl p-4 md:p-10 text-center z-[80] animate-fade-in">
                  {isStartingCamera ? (
-                    <div className="flex flex-col items-center gap-4">
+                    <div className="flex flex-col items-center gap-6">
                         <Loader2 size={48} className="text-white animate-spin opacity-50" />
-                        <p className="elegant-font italic text-white/50 tracking-widest">Warming up lens...</p>
+                        <p className="elegant-font italic text-white/50 text-xl tracking-widest">Warming up lens...</p>
                     </div>
                  ) : (
                     <>
-                        <h2 className="elegant-font italic text-white text-2xl md:text-4xl mb-4 md:mb-8 tracking-widest uppercase">Select Style</h2>
+                        <h2 className="elegant-font italic text-white text-2xl md:text-5xl mb-4 md:mb-10 tracking-[0.1em] uppercase">Style Selection</h2>
                         
-                        <div className="grid grid-cols-3 gap-2 md:gap-4 mb-8 md:mb-12 w-full max-w-md md:max-w-xl">
+                        <div className="grid grid-cols-3 gap-2 md:gap-5 mb-8 md:mb-14 w-full max-w-lg md:max-w-2xl px-2">
                         {Object.values(FilterType).map((fid) => (
                             <button
                                 key={fid} onClick={(e) => { e.stopPropagation(); setSelectedFilter(fid); }}
-                                className={`py-2 md:py-4 px-1 md:px-3 border-2 transition-all clean-font text-[9px] md:text-xs uppercase font-bold h-12 md:h-16 flex items-center justify-center ${
-                                selectedFilter === fid ? 'bg-white text-black border-white scale-105 shadow-xl' : 'bg-black/40 text-white/50 border-white/10 hover:border-white/30'
+                                className={`py-3 md:py-6 px-1 md:px-2 border-2 transition-all clean-font text-[8px] md:text-[11px] uppercase font-black min-h-[48px] md:min-h-[72px] flex items-center justify-center leading-tight tracking-tighter sm:tracking-normal ${
+                                selectedFilter === fid ? 'bg-white text-black border-white scale-105 shadow-2xl' : 'bg-black/40 text-white/50 border-white/20 hover:border-white/50'
                                 }`}
                             >
                             {fid.replace('_', ' ')}
@@ -367,10 +365,10 @@ const App: React.FC = () => {
 
                         <button 
                         onClick={(e) => { e.stopPropagation(); startShootingSequence(); }}
-                        className="bg-red-600 hover:bg-red-500 text-white px-8 md:px-12 py-4 md:py-6 rounded-full flex items-center gap-3 transition-all active:scale-95 shadow-[0_0_30px_rgba(220,38,38,0.5)] group"
+                        className="bg-red-600 hover:bg-red-500 text-white px-8 md:px-16 py-4 md:py-8 rounded-full flex items-center gap-3 md:gap-4 transition-all active:scale-95 shadow-[0_0_40px_rgba(220,38,38,0.6)] group"
                         >
-                        <Camera size={24} className="group-hover:rotate-12 transition-transform" />
-                        <span className="elegant-font font-bold text-lg md:text-2xl uppercase tracking-[0.2em]">Start Session</span>
+                        <Camera size={28} className="group-hover:rotate-12 transition-transform" />
+                        <span className="elegant-font font-bold text-lg md:text-3xl uppercase tracking-[0.15em]">Start Session</span>
                         </button>
                     </>
                  )}
@@ -379,55 +377,55 @@ const App: React.FC = () => {
             
             {state === BoothState.COUNTDOWN && !isPausedUI && (
               <div className="absolute inset-0 flex items-center justify-center z-[80] pointer-events-none">
-                 <div className="elegant-font italic text-white text-[120px] md:text-[240px] animate-[pop_0.5s_ease-out] drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]">{countdown}</div>
+                 <div className="elegant-font italic text-white text-[120px] md:text-[280px] animate-[pop_0.5s_ease-out] drop-shadow-[0_20px_50px_rgba(0,0,0,0.8)]">{countdown}</div>
               </div>
             )}
             <div className={`absolute inset-0 bg-white transition-opacity duration-75 pointer-events-none z-[90] ${isFlashActive ? 'opacity-100' : 'opacity-0'}`} />
           </div>
           
-          <div className="w-full flex items-center justify-between px-2 md:px-6 mt-6">
-            <div className="flex items-center gap-6">
+          <div className="w-full flex items-center justify-between px-4 md:px-8 mt-6 md:mt-10">
+            <div className="flex items-center gap-6 md:gap-10">
               <div className="flex flex-col items-center">
-                <div className={`w-3 h-3 md:w-4 md:h-4 rounded-full transition-all ${isShooting && !isPausedUI ? 'bg-red-500 shadow-[0_0_15px_red] scale-125' : 'bg-red-950'}`}></div>
-                <span className="clean-font text-[8px] md:text-[9px] text-white/20 uppercase mt-1">REC</span>
+                <div className={`w-3 h-3 md:w-5 md:h-5 rounded-full transition-all ${isShooting && !isPausedUI ? 'bg-red-500 shadow-[0_0_20px_red] scale-125' : 'bg-red-950'}`}></div>
+                <span className="clean-font text-[8px] md:text-[10px] text-white/30 uppercase mt-2 font-bold">REC</span>
               </div>
               <div className="flex flex-col items-center">
-                <div className={`w-3 h-3 md:w-4 md:h-4 rounded-full ${state === BoothState.READY ? 'bg-green-500 shadow-[0_0_15px_green]' : 'bg-green-950'}`}></div>
-                <span className="clean-font text-[8px] md:text-[9px] text-white/20 uppercase mt-1">RDY</span>
+                <div className={`w-3 h-3 md:w-5 md:h-5 rounded-full ${state === BoothState.READY ? 'bg-green-500 shadow-[0_0_20px_green]' : 'bg-green-950'}`}></div>
+                <span className="clean-font text-[8px] md:text-[10px] text-white/30 uppercase mt-2 font-bold">RDY</span>
               </div>
             </div>
             <div className="flex flex-col items-end">
-              <span className="elegant-font text-white text-lg md:text-5xl tracking-[0.1em] uppercase">
-                POSE <span className="font-bold">{photos.length + (state === BoothState.READY ? 0 : 1)}</span> <span className="text-white/20">/</span> 4
+              <span className="elegant-font text-white text-xl md:text-6xl tracking-[0.1em] uppercase leading-none">
+                POSE <span className="font-bold">{photos.length + (state === BoothState.READY ? 0 : 1)}</span> <span className="text-white/30">/</span> 4
               </span>
             </div>
           </div>
 
           {state === BoothState.DEVELOPING && (
-            <div className="absolute inset-0 bg-[#080808] z-[250] flex flex-col items-center justify-center p-6 text-center animate-fade-in">
-               <div className="elegant-font italic text-white text-3xl md:text-6xl animate-pulse tracking-[0.2em] mb-4">Developing...</div>
-               <p className="clean-font text-white/30 text-[10px] md:text-xs uppercase tracking-[0.3em] mb-8">Silver Halide Process in Progress</p>
-               <div className="w-full max-w-xs md:max-w-md h-2 bg-white/5 rounded-full overflow-hidden mt-8 border border-white/10">
-                 <div className="h-full bg-gradient-to-r from-white/20 via-white/60 to-white/20 animate-[progress_3.5s_linear]"></div>
+            <div className="absolute inset-0 bg-[#080808] z-[250] flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+               <div className="elegant-font italic text-white text-3xl md:text-7xl animate-pulse tracking-[0.2em] mb-4 md:mb-6">Developing...</div>
+               <p className="clean-font text-white/40 text-[10px] md:text-sm uppercase tracking-[0.4em] mb-8 md:mb-10">Authentic Chemical Processing</p>
+               <div className="w-full max-w-xs md:max-w-xl h-2 md:h-3 bg-white/10 rounded-full overflow-hidden mt-4 md:mt-8 border border-white/20">
+                 <div className="h-full bg-gradient-to-r from-white/30 via-white/80 to-white/30 animate-[progress_3.5s_linear]"></div>
                </div>
-               <p className="elegant-font italic text-white/20 mt-12 text-sm tracking-widest animate-pulse">Smell the chemicals...</p>
+               <p className="elegant-font italic text-white/20 mt-12 md:mt-16 text-sm md:text-lg tracking-widest animate-pulse">Wait for the silver nitrate to settle...</p>
             </div>
           )}
         </div>
       )}
 
       {state === BoothState.RESULT && (
-        <div className="fixed bottom-0 left-0 w-full px-4 pb-12 pt-16 flex flex-col items-center gap-6 z-[300] animate-[slideUpUI_1.2s_ease-out_1.2s_both]">
-           <div className="flex flex-col items-center gap-4 md:gap-6 p-4 md:p-6 bg-black/85 backdrop-blur-[45px] border border-white/20 rounded-[2.5rem] md:rounded-[3.5rem] shadow-[0_-30px_150px_rgba(0,0,0,1)] ring-1 ring-white/10 w-full max-w-lg mx-auto">
+        <div className="fixed bottom-0 left-0 w-full px-5 pb-10 pt-12 flex flex-col items-center z-[300] animate-[slideUpUI_1.2s_ease-out_1.2s_both]">
+           <div className="flex flex-col gap-4 p-5 md:p-7 bg-black/90 backdrop-blur-[60px] border border-white/20 rounded-[2.5rem] md:rounded-[3.5rem] shadow-[0_-30px_150px_rgba(0,0,0,1)] ring-1 ring-white/10 w-full max-w-lg mx-auto">
               
-              <div className="w-full flex flex-col sm:flex-row gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button 
                   disabled={isDownloading !== null}
                   onClick={() => { if(finalImage) triggerDownload(finalImage, `photoautomat-${Date.now()}.png`, 'image'); }} 
-                  className="flex-1 bg-white text-black h-14 md:h-16 rounded-full flex items-center justify-center gap-3 transition-all active:scale-95 shadow-[0_15px_45px_rgba(255,255,255,0.25)] disabled:opacity-50"
+                  className="bg-white text-black h-16 md:h-20 rounded-[1.5rem] flex items-center justify-center gap-3 transition-all active:scale-95 shadow-[0_15px_40px_rgba(255,255,255,0.25)] disabled:opacity-50"
                 >
                   {isDownloading === 'image' ? <Loader2 size={24} className="animate-spin" /> : <Download size={24} />}
-                  <span className="elegant-font text-sm md:text-lg font-bold uppercase tracking-widest">
+                  <span className="elegant-font text-base md:text-xl font-black uppercase tracking-widest">
                     {isDownloading === 'image' ? 'Saving...' : 'Save Strip'}
                   </span>
                 </button>
@@ -436,10 +434,10 @@ const App: React.FC = () => {
                   <button 
                     disabled={isDownloading !== null}
                     onClick={() => { if(recordedVideoUrl) triggerDownload(recordedVideoUrl, `photoautomat-${Date.now()}.mp4`, 'video'); }} 
-                    className="flex-1 bg-white/10 text-white h-14 md:h-16 rounded-full flex items-center justify-center gap-3 border border-white/20 transition-all active:scale-95 disabled:opacity-50"
+                    className="bg-zinc-800 text-white h-16 md:h-20 rounded-[1.5rem] flex items-center justify-center gap-3 border border-white/10 transition-all active:scale-95 disabled:opacity-50 hover:bg-zinc-700"
                   >
                     {isDownloading === 'video' ? <Loader2 size={24} className="animate-spin text-red-500" /> : <Video size={24} className="text-red-500" />}
-                    <span className="elegant-font text-sm md:text-lg font-bold uppercase tracking-widest">
+                    <span className="elegant-font text-base md:text-xl font-black uppercase tracking-widest">
                       {isDownloading === 'video' ? 'Saving...' : 'Save Video'}
                     </span>
                   </button>
@@ -448,10 +446,10 @@ const App: React.FC = () => {
               
               <button 
                 onClick={resetBooth} 
-                className="w-full bg-red-600/10 hover:bg-red-600/20 text-red-500 h-12 rounded-full border border-red-500/20 transition-all flex items-center justify-center gap-2 group"
+                className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-500 h-14 rounded-full border border-red-600/30 transition-all flex items-center justify-center gap-3 group"
               >
-                <RefreshCw size={18} className="group-hover:rotate-180 transition-transform duration-500" />
-                <span className="clean-font text-[10px] font-bold uppercase tracking-[0.2em]">Start New Session</span>
+                <RefreshCw size={20} className="group-hover:rotate-180 transition-transform duration-700" />
+                <span className="clean-font text-[10px] md:text-xs font-black uppercase tracking-[0.2em]">New Session</span>
               </button>
            </div>
         </div>
@@ -461,13 +459,13 @@ const App: React.FC = () => {
         @keyframes centerPhysicalDrop {
           0% { transform: translateY(-120vh); opacity: 0; }
           15% { opacity: 1; }
-          100% { transform: translateY(5vh) rotate(-4deg); opacity: 1; }
+          100% { transform: translateY(0vh) rotate(-4deg); opacity: 1; }
         }
-        @keyframes slideUpUI { from { transform: translateY(300px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        @keyframes zoomIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-        @keyframes pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        @keyframes slideUpUI { from { transform: translateY(400px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes zoomIn { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes pop { 0% { transform: scale(0.7); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
         @keyframes progress { from { width: 0%; } to { width: 100%; } }
-        .animate-fade-in { animation: fadeIn 0.4s ease-out; }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
       `}</style>
     </div>
