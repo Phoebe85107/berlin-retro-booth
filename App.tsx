@@ -6,7 +6,6 @@ import { playSFX, createSFX } from './utils/audioUtils';
 import BoothExterior from './components/BoothExterior';
 import { Download, RefreshCw, Video, Camera, X, Pause, Play, Loader2 } from 'lucide-react';
 
-// --- 音效網址 ---
 const SHUTTER_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/2857/2857-preview.mp3';
 const CURTAIN_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/2858/2858-preview.mp3';
 const PRINT_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/2556/2556-preview.mp3';
@@ -183,22 +182,42 @@ const App: React.FC = () => {
 
   const createAnimatedStrip = async () => {
     if (videoSegmentsRef.current.length < 4 || !compositeCanvasRef.current) return;
+    
+    // 1. 設定錄製與緩衝 Canvas
     const canvas = compositeCanvasRef.current;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const ctx = canvas.getContext('2d', { alpha: false }); // 關閉透明度提升效能
     if (!ctx) return;
+
+    // 建立緩衝 Canvas 以防止閃爍
+    const bufferCanvas = document.createElement('canvas');
+    const bctx = bufferCanvas.getContext('2d', { alpha: false });
+    if (!bctx) return;
 
     const frameWidth = 480; const frameHeight = 360;
     const margin = 30; const spacing = 15; const bottomPadding = 120;
-    canvas.width = frameWidth + (margin * 2);
-    canvas.height = (frameHeight * 4) + (spacing * 3) + margin + bottomPadding;
+    const totalWidth = frameWidth + (margin * 2);
+    const totalHeight = (frameHeight * 4) + (spacing * 3) + margin + bottomPadding;
 
-    // 1. 建立並等待所有影片載入與播放
-    const videos = await Promise.all(videoSegmentsRef.current.map(blob => {
+    canvas.width = bufferCanvas.width = totalWidth;
+    canvas.height = bufferCanvas.height = totalHeight;
+
+    // 2. 建立影片元素並「強制」掛載到 DOM (iOS 必需)
+    const videoContainer = document.createElement('div');
+    videoContainer.style.position = 'fixed';
+    videoContainer.style.top = '-1000px';
+    videoContainer.style.opacity = '0';
+    videoContainer.style.pointerEvents = 'none';
+    document.body.appendChild(videoContainer);
+
+    const videos = await Promise.all(videoSegmentsRef.current.map((blob, idx) => {
       return new Promise<HTMLVideoElement>((resolve) => {
         const v = document.createElement('video');
         v.src = URL.createObjectURL(blob);
         v.muted = true; v.loop = true; v.playsInline = true;
-        // 關鍵：確保影片狀態已就緒
+        v.setAttribute('playsinline', '');
+        v.setAttribute('webkit-playsinline', '');
+        v.style.width = '10px';
+        videoContainer.appendChild(v);
         v.oncanplay = () => {
             v.play().then(() => resolve(v));
         };
@@ -206,18 +225,18 @@ const App: React.FC = () => {
       });
     }));
 
-    // 2. 準備錄製器
+    // 3. 準備錄製器
     const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-    const stream = canvas.captureStream(24); // 穩定的 24fps
+    const stream = canvas.captureStream(24);
     const chunks: Blob[] = [];
     const recorder = new MediaRecorder(stream, { 
       mimeType,
-      videoBitsPerSecond: 1500000 
+      videoBitsPerSecond: 2000000 
     });
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
-    // 3. 渲染循環優化 (手動濾鏡模擬，因為部分手機 captureStream 對 ctx.filter 不友善)
-    const drawFrame = (v: HTMLVideoElement, dx: number, dy: number, dw: number, dh: number) => {
+    // 4. 繪製邏輯
+    const drawFrameToBuffer = (v: HTMLVideoElement, dx: number, dy: number, dw: number, dh: number) => {
         const sw = v.videoWidth; const sh = v.videoHeight;
         if (!sw || !sh) return;
         const dr = dw / dh; const sr = sw / sh;
@@ -225,77 +244,81 @@ const App: React.FC = () => {
         if (sr > dr) { sWidth = sh * dr; sHeight = sh; sx = (sw - sWidth) / 2; sy = 0; }
         else { sWidth = sw; sHeight = sw / dr; sx = 0; sy = (sh - sHeight) / 2; }
         
-        ctx.drawImage(v, sx, sy, sWidth, sHeight, dx, dy, dw, dh);
+        bctx.drawImage(v, sx, sy, sWidth, sHeight, dx, dy, dw, dh);
 
-        // 手動覆蓋濾鏡效果 (模擬 B&W 或 Sepia)
+        // 手動模擬濾鏡 (對 iOS 錄製器最友好的方式)
         if (selectedFilter === FilterType.BERLIN_BW) {
-            ctx.save();
-            ctx.globalCompositeOperation = 'saturation';
-            ctx.fillStyle = 'black';
-            ctx.fillRect(dx, dy, dw, dh);
-            ctx.globalCompositeOperation = 'contrast';
-            ctx.fillStyle = 'rgba(0,0,0,0.1)';
-            ctx.fillRect(dx, dy, dw, dh);
-            ctx.restore();
+            bctx.save();
+            bctx.globalCompositeOperation = 'saturation';
+            bctx.fillStyle = 'black';
+            bctx.fillRect(dx, dy, dw, dh);
+            // Fix: Change invalid 'contrast' to 'overlay' to satisfy TypeScript constraints.
+            bctx.globalCompositeOperation = 'overlay';
+            bctx.fillStyle = 'rgba(0,0,0,0.1)';
+            bctx.fillRect(dx, dy, dw, dh);
+            bctx.restore();
         } else if (selectedFilter === FilterType.SEPIA) {
-            ctx.save();
-            ctx.globalCompositeOperation = 'color';
-            ctx.fillStyle = 'rgba(112, 66, 20, 0.4)';
-            ctx.fillRect(dx, dy, dw, dh);
-            ctx.restore();
+            bctx.save();
+            bctx.globalCompositeOperation = 'color';
+            bctx.fillStyle = 'rgba(112, 66, 20, 0.45)';
+            bctx.fillRect(dx, dy, dw, dh);
+            bctx.restore();
         }
     };
 
-    const render = () => {
-      // 繪製背景 (白色紙張)
-      ctx.fillStyle = '#fdfdfd';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const performRender = () => {
+      bctx.fillStyle = '#fdfdfd';
+      bctx.fillRect(0, 0, totalWidth, totalHeight);
       
       videos.forEach((v, i) => {
         const y = margin + (i * (frameHeight + spacing));
-        ctx.save();
+        bctx.save();
         if (isMirrored) {
-          ctx.translate(margin + frameWidth, y);
-          ctx.scale(-1, 1);
-          drawFrame(v, 0, 0, frameWidth, frameHeight);
+          bctx.translate(margin + frameWidth, y);
+          bctx.scale(-1, 1);
+          drawFrameToBuffer(v, 0, 0, frameWidth, frameHeight);
         } else {
-          drawFrame(v, margin, y, frameWidth, frameHeight);
+          drawFrameToBuffer(v, margin, y, frameWidth, frameHeight);
         }
-        ctx.restore();
-        ctx.strokeStyle = '#222'; 
-        ctx.lineWidth = 1;
-        ctx.strokeRect(margin, y, frameWidth, frameHeight);
+        bctx.restore();
+        bctx.strokeStyle = '#222'; 
+        bctx.lineWidth = 1;
+        bctx.strokeRect(margin, y, frameWidth, frameHeight);
       });
       
-      ctx.fillStyle = '#888'; 
-      ctx.font = '16px "Share Tech Mono"';
-      ctx.fillText('PHOTOAUTOMAT // ANIMATED STRIP', margin, canvas.height - 40);
+      bctx.fillStyle = '#888'; 
+      bctx.font = '16px "Share Tech Mono"';
+      bctx.fillText('PHOTOAUTOMAT // ANIMATED STRIP', margin, totalHeight - 40);
+
+      // 最後一步：將緩衝內容一次性貼回主 Canvas (防閃爍關鍵)
+      ctx.drawImage(bufferCanvas, 0, 0);
     };
 
-    // 4. 啟動錄製流程
-    render(); // 先畫第一格
+    // 5. 啟動循環與錄製
+    let isRecording = true;
+    const loop = () => {
+      if (!isRecording) return;
+      performRender();
+      requestAnimationFrame(loop);
+    };
+
+    performRender(); // 預熱
     setTimeout(() => {
         recorder.start();
-        let isRecording = true;
-        const loop = () => {
-          if (!isRecording) return;
-          render();
-          requestAnimationFrame(loop);
-        };
         loop();
-
-        // 錄製 4 秒後停止
         setTimeout(() => {
           isRecording = false;
           recorder.stop();
         }, 4000);
-    }, 200); // 稍微延遲以確保 Canvas 狀態穩定
+    }, 300);
 
     return new Promise<void>((resolve) => {
       recorder.onstop = () => {
         const blob = new Blob(chunks, { type: mimeType });
         setRecordedVideoUrl(URL.createObjectURL(blob));
+        // 清理
         videos.forEach(v => { v.pause(); URL.revokeObjectURL(v.src); });
+        if (document.body.contains(videoContainer)) document.body.removeChild(videoContainer);
         resolve();
       };
     });
