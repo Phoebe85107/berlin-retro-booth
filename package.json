@@ -1,9 +1,11 @@
+
 {
   "name": "berlin-retro-photo-booth",
   "version": "1.0.0",
   "description": "An immersive 80s-90s style photo booth experience with mechanical curtain animations and analog processing.",
   "type": "module",
   "scripts": {
+    "build": "echo 'Static ESM project - no build required.'",
     "dev": "npx serve .",
     "start": "npx serve ."
   },

@@ -15,8 +15,8 @@ A fully immersive, web-based vintage photo booth application inspired by the ico
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/berlin-retro-photo-booth.git
-   cd berlin-retro-photo-booth
+   git clone https://github.com/Phoebe85107/berlin-retro-booth.git
+   cd berlin-retro-booth
    ```
 
 2. **Run locally:**
