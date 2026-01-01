@@ -1,9 +1,10 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { BoothState, FilterType } from './types';
 import { processWithFilter, createFinalStrip, GET_FILTER_CSS } from './utils/imageUtils';
-import { playSFX } from './utils/audioUtils';
+import { playSFX, createSFX } from './utils/audioUtils';
 import BoothExterior from './components/BoothExterior';
-import { Download, RefreshCw, Video, Camera, X, Pause, Play } from 'lucide-react';
+import { Download, RefreshCw, Video, Camera, X, Pause, Play, Loader2 } from 'lucide-react';
 
 // --- 音效網址 ---
 const SHUTTER_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/2857/2857-preview.mp3';
@@ -20,16 +21,29 @@ const App: React.FC = () => {
   const [recordedBlobType, setRecordedBlobType] = useState<string>('');
   const [isMirrored, setIsMirrored] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState<FilterType>(FilterType.BERLIN_BW);
+  const [isDownloading, setIsDownloading] = useState<string | null>(null);
   
   const isPausedRef = useRef(false);
   const isCancelledRef = useRef(false);
   const [isPausedUI, setIsPausedUI] = useState(false);
+
+  // 使用 Ref 儲存音效物件以供重用
+  const shutterSoundRef = useRef<HTMLAudioElement | null>(null);
+  const curtainSoundRef = useRef<HTMLAudioElement | null>(null);
+  const printSoundRef = useRef<HTMLAudioElement | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const compositeCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoSegmentsRef = useRef<Blob[]>([]);
   const segmentRecorderRef = useRef<MediaRecorder | null>(null);
+
+  // 初始化音效物件（僅建立，不播放）
+  useEffect(() => {
+    shutterSoundRef.current = createSFX(SHUTTER_SOUND_URL);
+    curtainSoundRef.current = createSFX(CURTAIN_SOUND_URL);
+    printSoundRef.current = createSFX(PRINT_SOUND_URL);
+  }, []);
 
   const startCamera = async () => {
     try {
@@ -72,11 +86,13 @@ const App: React.FC = () => {
     isPausedRef.current = false;
     isCancelledRef.current = false;
     setIsPausedUI(false);
+    setIsDownloading(null);
     setState(BoothState.EXTERIOR);
   };
 
   const handleEnterBooth = async () => {
-    playSFX(CURTAIN_SOUND_URL, 0.7);
+    // 進入亭子時順便「解鎖」音效
+    if (curtainSoundRef.current) playSFX(curtainSoundRef.current, 0.7);
     const stream = await startCamera();
     if (stream) {
       setState(BoothState.ENTERING);
@@ -104,6 +120,17 @@ const App: React.FC = () => {
     isPausedRef.current = false;
     setIsPausedUI(false);
     
+    // 行動裝置關鍵：在使用者點擊按鈕的瞬間「解鎖」快門音效
+    // 播放一個靜音的片刻來取得瀏覽器授權
+    if (shutterSoundRef.current) {
+      const originalVolume = shutterSoundRef.current.volume;
+      shutterSoundRef.current.volume = 0;
+      shutterSoundRef.current.play().then(() => {
+        shutterSoundRef.current!.pause();
+        shutterSoundRef.current!.volume = originalVolume;
+      }).catch(() => {});
+    }
+
     const stream = streamRef.current;
     videoSegmentsRef.current = [];
     const captured: string[] = [];
@@ -136,7 +163,13 @@ const App: React.FC = () => {
         }
         
         setState(BoothState.SHUTTER);
-        playSFX(SHUTTER_SOUND_URL, 0.8);
+        // 使用預載且解鎖過的音效物件播放
+        if (shutterSoundRef.current) {
+          playSFX(shutterSoundRef.current, 0.8);
+        } else {
+          playSFX(SHUTTER_SOUND_URL, 0.8);
+        }
+
         setIsFlashActive(true);
         if (videoRef.current) {
           const photo = processWithFilter(videoRef.current, selectedFilter, isMirrored);
@@ -227,7 +260,7 @@ const App: React.FC = () => {
         setFinalImage(strip);
         await createAnimatedStrip();
         setTimeout(() => {
-          playSFX(PRINT_SOUND_URL, 1.0);
+          if (printSoundRef.current) playSFX(printSoundRef.current, 1.0);
           setState(BoothState.RESULT);
         }, 3000);
       };
@@ -235,10 +268,27 @@ const App: React.FC = () => {
     }
   }, [state, photos]);
 
+  const triggerDownload = (url: string, filename: string, type: 'image' | 'video') => {
+    setIsDownloading(type);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    try {
+      link.click();
+    } catch (e) {
+      window.open(url, '_blank');
+    }
+    setTimeout(() => {
+      document.body.removeChild(link);
+      setIsDownloading(null);
+    }, 1200);
+  };
+
   const abortSession = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     isCancelledRef.current = true;
-    // 如果在 READY 階段點擊 X，直接重置
     if (state === BoothState.READY) {
       resetBooth();
     }
@@ -374,14 +424,30 @@ const App: React.FC = () => {
       {state === BoothState.RESULT && (
         <div className="fixed bottom-0 left-0 w-full px-4 pb-12 pt-16 flex flex-col items-center gap-6 z-[300] animate-[slideUpUI_1.2s_ease-out_1.2s_both]">
            <div className="flex flex-col sm:flex-row items-center gap-6 p-6 bg-black/85 backdrop-blur-[45px] border border-white/20 rounded-[3rem] shadow-[0_-30px_150px_rgba(0,0,0,1)] ring-1 ring-white/10">
-              <button onClick={() => { if(finalImage) { const l=document.createElement('a'); l.download=`photo-${Date.now()}.png`; l.href=finalImage; l.click(); }}} className="w-full sm:w-auto bg-white text-black px-10 py-5 rounded-full flex items-center justify-center gap-3 transition-all active:scale-95 shadow-[0_15px_45px_rgba(255,255,255,0.25)]">
-                <Download size={28} /> <span className="elegant-font text-[18px] font-bold uppercase tracking-widest">Save Memory</span>
+              <button 
+                disabled={isDownloading !== null}
+                onClick={() => { if(finalImage) triggerDownload(finalImage, `photo-${Date.now()}.png`, 'image'); }} 
+                className="w-full sm:w-auto bg-white text-black px-10 py-5 rounded-full flex items-center justify-center gap-3 transition-all active:scale-95 shadow-[0_15px_45px_rgba(255,255,255,0.25)] disabled:opacity-50"
+              >
+                {isDownloading === 'image' ? <Loader2 size={28} className="animate-spin" /> : <Download size={28} />}
+                <span className="elegant-font text-[18px] font-bold uppercase tracking-widest">
+                  {isDownloading === 'image' ? 'Saving...' : 'Save Memory'}
+                </span>
               </button>
+              
               {recordedVideoUrl && (
-                <button onClick={() => { if(recordedVideoUrl) { const l=document.createElement('a'); l.download=`video-${Date.now()}.mp4`; l.href=recordedVideoUrl; l.click(); }}} className="w-full sm:w-auto bg-white/10 text-white px-10 py-5 rounded-full flex items-center justify-center gap-3 border border-white/20 transition-all active:scale-95">
-                  <Video size={28} className="text-red-500" /> <span className="elegant-font text-[18px] font-bold uppercase tracking-widest">Animated</span>
+                <button 
+                  disabled={isDownloading !== null}
+                  onClick={() => { if(recordedVideoUrl) triggerDownload(recordedVideoUrl, `video-${Date.now()}.mp4`, 'video'); }} 
+                  className="w-full sm:w-auto bg-white/10 text-white px-10 py-5 rounded-full flex items-center justify-center gap-3 border border-white/20 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {isDownloading === 'video' ? <Loader2 size={28} className="animate-spin text-red-500" /> : <Video size={28} className="text-red-500" />}
+                  <span className="elegant-font text-[18px] font-bold uppercase tracking-widest">
+                    {isDownloading === 'video' ? 'Saving...' : 'Animated'}
+                  </span>
                 </button>
               )}
+              
               <button onClick={resetBooth} className="bg-white/5 text-white p-6 rounded-full border border-white/10 hover:rotate-180 transition-all">
                 <RefreshCw size={32} />
               </button>
