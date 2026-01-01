@@ -3,8 +3,12 @@
  * 建立並預載音效物件，用於在使用者互動時「解鎖」行動裝置音效
  */
 export const createSFX = (url: string): HTMLAudioElement => {
-  const audio = new Audio(url);
+  const audio = new Audio();
+  audio.src = url;
   audio.preload = 'auto';
+  // 重要：行動裝置有時需要 crossOrigin 權限才能正常播放
+  audio.crossOrigin = 'anonymous';
+  audio.load();
   return audio;
 };
 
@@ -19,12 +23,13 @@ export const playSFX = (audioOrUrl: string | HTMLAudioElement, volume: number = 
     
     if (typeof audioOrUrl === 'string') {
       audio = new Audio(audioOrUrl);
+      audio.crossOrigin = 'anonymous';
     } else {
       audio = audioOrUrl;
     }
 
+    // 確保音量與進度正確
     audio.volume = volume;
-    // 重置播放進度，這對重複使用同一個音效物件至關重要
     audio.currentTime = 0;
     
     const playPromise = audio.play();

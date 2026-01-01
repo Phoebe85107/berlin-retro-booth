@@ -38,7 +38,7 @@ const App: React.FC = () => {
   const segmentRecorderRef = useRef<MediaRecorder | null>(null);
 
   useEffect(() => {
-    // 預載音效
+    // 初始化時預載所有音效
     shutterSoundRef.current = createSFX(SHUTTER_SOUND_URL);
     curtainSoundRef.current = createSFX(CURTAIN_SOUND_URL);
     printSoundRef.current = createSFX(PRINT_SOUND_URL);
@@ -95,27 +95,20 @@ const App: React.FC = () => {
   };
 
   const handleEnterBooth = async () => {
-    // --- 關鍵：行動裝置音效解鎖邏輯 ---
-    const unlockAudio = () => {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      if (ctx.state === 'suspended') ctx.resume();
-
-      // 在使用者點擊的當下，靜音播放並暫停所有音效物件，獲取系統權限
-      [shutterSoundRef.current, curtainSoundRef.current, printSoundRef.current].forEach(sfx => {
-        if (sfx) {
-          const originalVolume = sfx.volume;
-          sfx.volume = 0;
-          sfx.play().then(() => {
-            sfx.pause();
-            sfx.volume = originalVolume;
-            sfx.currentTime = 0;
-          }).catch(() => {});
-        }
-      });
+    const unlock = (sfx: HTMLAudioElement | null) => {
+      if (!sfx) return;
+      sfx.play().then(() => {
+        sfx.pause();
+        sfx.currentTime = 0;
+      }).catch(e => console.warn("Audio unlock failed", e));
     };
-    unlockAudio();
+
+    unlock(curtainSoundRef.current);
+    unlock(shutterSoundRef.current);
+    unlock(printSoundRef.current);
 
     if (curtainSoundRef.current) playSFX(curtainSoundRef.current, 0.7);
+
     const stream = await startCamera();
     if (stream) {
       setState(BoothState.ENTERING);
@@ -212,42 +205,82 @@ const App: React.FC = () => {
     }));
 
     const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-    const stream = canvas.captureStream(30);
+    // 降低影格率以提升行動裝置相容性
+    const stream = canvas.captureStream(24);
     const chunks: Blob[] = [];
-    const recorder = new MediaRecorder(stream, { mimeType });
-    recorder.ondataavailable = (e) => chunks.push(e.data);
+    const recorder = new MediaRecorder(stream, { 
+      mimeType,
+      videoBitsPerSecond: 2500000 // 限制流量以提升相容性
+    });
+    
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
     
     const filterString = GET_FILTER_CSS(selectedFilter);
 
+    // 輔助函式：確保影片正確填充區域 (Cover)
+    const drawFrame = (v: HTMLVideoElement, dx: number, dy: number, dw: number, dh: number) => {
+        const sw = v.videoWidth;
+        const sh = v.videoHeight;
+        if (!sw || !sh) return;
+        const dr = dw / dh;
+        const sr = sw / sh;
+        let sWidth, sHeight, sx, sy;
+        if (sr > dr) {
+            sWidth = sh * dr; sHeight = sh; sx = (sw - sWidth) / 2; sy = 0;
+        } else {
+            sWidth = sw; sHeight = sw / dr; sx = 0; sy = (sh - sHeight) / 2;
+        }
+        ctx.drawImage(v, sx, sy, sWidth, sHeight, dx, dy, dw, dh);
+    };
+
+    let isRecording = true;
     const renderLoop = () => {
-      if (recorder.state === 'inactive') return;
+      if (!isRecording) return;
+      
+      // 清背景
       ctx.fillStyle = '#fdfdfd';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
       videos.forEach((v, i) => {
         const y = margin + (i * (frameHeight + spacing));
         ctx.save();
+        
+        // 確保濾鏡被套用 (CSS filter string)
         ctx.filter = filterString;
+        
         if (isMirrored) {
           ctx.translate(margin + frameWidth, y);
           ctx.scale(-1, 1);
-          ctx.drawImage(v, 0, 0, frameWidth, frameHeight);
+          drawFrame(v, 0, 0, frameWidth, frameHeight);
         } else {
-          ctx.drawImage(v, margin, y, frameWidth, frameHeight);
+          drawFrame(v, margin, y, frameWidth, frameHeight);
         }
         ctx.restore();
+        
+        // 外框線
         ctx.strokeStyle = '#222'; 
         ctx.lineWidth = 1;
         ctx.strokeRect(margin, y, frameWidth, frameHeight);
       });
+      
+      // 底部文字
       ctx.fillStyle = '#888'; 
       ctx.font = '16px "Share Tech Mono"';
       ctx.fillText('PHOTOAUTOMAT // ANIMATED STRIP', margin, canvas.height - 40);
+      
       requestAnimationFrame(renderLoop);
     };
 
-    recorder.start(); 
+    // 先畫一格「預熱」Canvas，避免 CaptureStream 抓到空白
     renderLoop();
+    
+    // 稍微延遲錄製開始
+    setTimeout(() => {
+        recorder.start();
+    }, 100);
+
     await new Promise(r => setTimeout(r, 4000));
+    isRecording = false;
     recorder.stop();
 
     return new Promise<void>((resolve) => {
@@ -267,7 +300,6 @@ const App: React.FC = () => {
         setFinalImage(strip);
         await createAnimatedStrip();
         setTimeout(() => {
-          // 在此處切換至 RESULT 狀態並播放列印聲
           setState(BoothState.RESULT);
           if (printSoundRef.current) playSFX(printSoundRef.current, 1.0);
         }, 3500);
@@ -366,11 +398,11 @@ const App: React.FC = () => {
                     <>
                         <h2 className="elegant-font italic text-white text-2xl md:text-5xl mb-4 md:mb-10 tracking-[0.1em] uppercase">Style Selection</h2>
                         
-                        <div className="grid grid-cols-3 gap-2 md:gap-5 mb-8 md:mb-14 w-full max-w-lg md:max-w-2xl px-2">
+                        <div className="grid grid-cols-3 gap-2 md:gap-4 mb-8 md:mb-14 w-full max-w-lg md:max-w-2xl px-2">
                         {Object.values(FilterType).map((fid) => (
                             <button
                                 key={fid} onClick={(e) => { e.stopPropagation(); setSelectedFilter(fid); }}
-                                className={`py-3 md:py-6 px-1 md:px-2 border-2 transition-all clean-font text-[8px] md:text-[11px] uppercase font-black min-h-[48px] md:min-h-[72px] flex items-center justify-center leading-tight tracking-tighter sm:tracking-normal ${
+                                className={`py-2 md:py-6 px-1 md:px-2 border-2 transition-all clean-font text-[9px] md:text-[11px] uppercase font-black min-h-[50px] md:min-h-[72px] flex items-center justify-center leading-tight tracking-tighter ${
                                 selectedFilter === fid ? 'bg-white text-black border-white scale-105 shadow-2xl' : 'bg-black/40 text-white/50 border-white/20 hover:border-white/50'
                                 }`}
                             >
