@@ -17,28 +17,33 @@
         75% { transform: translateX(1px); }
         100% { transform: translateX(0); }
       }
-      .animate-jitter {
-        animation: jitter 0.1s infinite;
-      }
-      .retro-font {
-        font-family: 'Press Start 2P', cursive;
-      }
-      .mono-font {
-        font-family: 'Share Tech Mono', monospace;
-      }
-      .vintage-font {
-        font-family: 'Special Elite', system-ui;
-      }
-      .elegant-font {
-        font-family: 'Playfair Display', serif;
-      }
-      .clean-font {
-        font-family: 'Montserrat', sans-serif;
-      }
+      .animate-jitter { animation: jitter 0.1s infinite; }
+      .retro-font { font-family: 'Press Start 2P', cursive; }
+      .mono-font { font-family: 'Share Tech Mono', monospace; }
+      .vintage-font { font-family: 'Special Elite', system-ui; }
+      .elegant-font { font-family: 'Playfair Display', serif; }
+      .clean-font { font-family: 'Montserrat', sans-serif; }
+      
       body {
         background-color: #0c0c0c;
         margin: 0;
         overflow: hidden;
+      }
+      /* 全局復古疊層 */
+      .retro-texture-overlay {
+        position: fixed;
+        inset: 0;
+        background-image: url('https://www.transparenttextures.com/patterns/dust.png');
+        opacity: 0.05;
+        pointer-events: none;
+        z-index: 9999;
+      }
+      .retro-vignette {
+        position: fixed;
+        inset: 0;
+        background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.5) 100%);
+        pointer-events: none;
+        z-index: 9998;
       }
     </style>
   <script type="importmap">
@@ -54,6 +59,8 @@
 <link rel="stylesheet" href="/index.css">
 </head>
   <body>
+    <div class="retro-texture-overlay"></div>
+    <div class="retro-vignette"></div>
     <div id="root"></div>
   <script type="module" src="/index.tsx"></script>
 </body>

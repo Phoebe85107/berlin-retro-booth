@@ -18,16 +18,14 @@ const App: React.FC = () => {
   const [finalImage, setFinalImage] = useState<string | null>(null);
   const [isFlashActive, setIsFlashActive] = useState(false);
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
-  const [recordedBlobType, setRecordedBlobType] = useState<string>('');
   const [isMirrored, setIsMirrored] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState<FilterType>(FilterType.BERLIN_BW);
-  const [isDownloading, setIsDownloading] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState<'image' | 'video' | null>(null);
   
   const isPausedRef = useRef(false);
   const isCancelledRef = useRef(false);
   const [isPausedUI, setIsPausedUI] = useState(false);
 
-  // 使用 Ref 儲存音效物件以供重用
   const shutterSoundRef = useRef<HTMLAudioElement | null>(null);
   const curtainSoundRef = useRef<HTMLAudioElement | null>(null);
   const printSoundRef = useRef<HTMLAudioElement | null>(null);
@@ -38,7 +36,6 @@ const App: React.FC = () => {
   const videoSegmentsRef = useRef<Blob[]>([]);
   const segmentRecorderRef = useRef<MediaRecorder | null>(null);
 
-  // 初始化音效物件（僅建立，不播放）
   useEffect(() => {
     shutterSoundRef.current = createSFX(SHUTTER_SOUND_URL);
     curtainSoundRef.current = createSFX(CURTAIN_SOUND_URL);
@@ -60,9 +57,12 @@ const App: React.FC = () => {
     }
   };
 
+  // 核心修復：確保當 video 元素渲染時，立即賦予串流
   useEffect(() => {
     if (videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+      }
       videoRef.current.play().catch(e => console.error("Video play failed:", e));
     }
   }, [state]);
@@ -91,7 +91,6 @@ const App: React.FC = () => {
   };
 
   const handleEnterBooth = async () => {
-    // 進入亭子時順便「解鎖」音效
     if (curtainSoundRef.current) playSFX(curtainSoundRef.current, 0.7);
     const stream = await startCamera();
     if (stream) {
@@ -120,8 +119,6 @@ const App: React.FC = () => {
     isPausedRef.current = false;
     setIsPausedUI(false);
     
-    // 行動裝置關鍵：在使用者點擊按鈕的瞬間「解鎖」快門音效
-    // 播放一個靜音的片刻來取得瀏覽器授權
     if (shutterSoundRef.current) {
       const originalVolume = shutterSoundRef.current.volume;
       shutterSoundRef.current.volume = 0;
@@ -163,12 +160,7 @@ const App: React.FC = () => {
         }
         
         setState(BoothState.SHUTTER);
-        // 使用預載且解鎖過的音效物件播放
-        if (shutterSoundRef.current) {
-          playSFX(shutterSoundRef.current, 0.8);
-        } else {
-          playSFX(SHUTTER_SOUND_URL, 0.8);
-        }
+        if (shutterSoundRef.current) playSFX(shutterSoundRef.current, 0.8);
 
         setIsFlashActive(true);
         if (videoRef.current) {
@@ -245,7 +237,6 @@ const App: React.FC = () => {
     return new Promise<void>((resolve) => {
       recorder.onstop = () => {
         const blob = new Blob(chunks, { type: mimeType });
-        setRecordedBlobType(mimeType);
         setRecordedVideoUrl(URL.createObjectURL(blob));
         videos.forEach(v => { v.pause(); URL.revokeObjectURL(v.src); });
         resolve();
@@ -281,17 +272,9 @@ const App: React.FC = () => {
       window.open(url, '_blank');
     }
     setTimeout(() => {
-      document.body.removeChild(link);
+      if (document.body.contains(link)) document.body.removeChild(link);
       setIsDownloading(null);
-    }, 1200);
-  };
-
-  const abortSession = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    isCancelledRef.current = true;
-    if (state === BoothState.READY) {
-      resetBooth();
-    }
+    }, 1500);
   };
 
   const isInside = state === BoothState.READY || state === BoothState.COUNTDOWN || state === BoothState.SHUTTER || state === BoothState.DEVELOPING;
@@ -315,7 +298,7 @@ const App: React.FC = () => {
       {state === BoothState.RESULT && finalImage && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center pointer-events-none overflow-hidden pb-[15vh]">
              <div className="relative animate-[centerPhysicalDrop_4.5s_cubic-bezier(0.2, 0.8, 0.2, 1)_forwards]">
-                <img src={finalImage} alt="Strip" className="h-[65vh] md:h-[70vh] w-auto border-[4px] border-white shadow-[0_50px_150px_rgba(0,0,0,1)] pointer-events-auto" style={{ transform: 'rotate(-4deg)' }} />
+                <img src={finalImage} alt="Strip" className="h-[60vh] md:h-[70vh] w-auto border-[4px] border-white shadow-[0_50px_150px_rgba(0,0,0,1)] pointer-events-auto" style={{ transform: 'rotate(-4deg)' }} />
              </div>
         </div>
       )}
@@ -334,7 +317,7 @@ const App: React.FC = () => {
                  </button>
                )}
                <button 
-                onClick={abortSession}
+                onClick={() => resetBooth()}
                 className="p-3 md:p-4 rounded-full bg-red-600/20 text-red-500 border border-red-500/30 hover:bg-red-600 hover:text-white transition-all active:scale-90"
                >
                  <X size={20} />
@@ -359,12 +342,12 @@ const App: React.FC = () => {
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 backdrop-blur-md p-6 text-center z-[80] animate-fade-in">
                  <h2 className="elegant-font italic text-white text-2xl md:text-4xl mb-4 md:mb-8 tracking-widest uppercase">Select Style</h2>
                  
-                 <div className="grid grid-cols-3 sm:grid-cols-3 gap-2 md:gap-4 mb-8 md:mb-12 w-full max-w-md md:max-w-xl">
+                 <div className="grid grid-cols-3 gap-2 md:gap-4 mb-8 md:mb-12 w-full max-w-md md:max-w-xl">
                    {Object.values(FilterType).map((fid) => (
                      <button
                         key={fid} onClick={(e) => { e.stopPropagation(); setSelectedFilter(fid); }}
-                        className={`py-2 md:py-4 px-1 md:px-3 border-2 transition-all clean-font text-[9px] md:text-xs uppercase tracking-tighter sm:tracking-widest font-bold h-12 md:h-16 flex items-center justify-center ${
-                          selectedFilter === fid ? 'bg-white text-black border-white scale-105 shadow-[0_0_15px_rgba(255,255,255,0.3)]' : 'bg-black/40 text-white/50 border-white/10 hover:border-white/30'
+                        className={`py-2 md:py-4 px-1 md:px-3 border-2 transition-all clean-font text-[9px] md:text-xs uppercase font-bold h-12 md:h-16 flex items-center justify-center ${
+                          selectedFilter === fid ? 'bg-white text-black border-white scale-105' : 'bg-black/40 text-white/50 border-white/10 hover:border-white/30'
                         }`}
                      >
                        {fid.replace('_', ' ')}
@@ -384,7 +367,7 @@ const App: React.FC = () => {
             
             {state === BoothState.COUNTDOWN && !isPausedUI && (
               <div className="absolute inset-0 flex items-center justify-center z-[80] pointer-events-none">
-                 <div className="elegant-font italic text-white text-[120px] md:text-[240px] drop-shadow-[0_10px_40px_rgba(0,0,0,0.9)] animate-[pop_0.5s_ease-out]">{countdown}</div>
+                 <div className="elegant-font italic text-white text-[120px] md:text-[240px] animate-[pop_0.5s_ease-out]">{countdown}</div>
               </div>
             )}
             <div className={`absolute inset-0 bg-white transition-opacity duration-75 pointer-events-none z-[90] ${isFlashActive ? 'opacity-100' : 'opacity-0'}`} />
@@ -402,7 +385,6 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="flex flex-col items-end">
-              <span className="elegant-font text-white/40 text-[9px] md:text-[10px] italic tracking-[0.1em]">Session Progress</span>
               <span className="elegant-font text-white text-lg md:text-5xl tracking-[0.1em] uppercase">
                 POSE <span className="font-bold">{photos.length + (state === BoothState.READY ? 0 : 1)}</span> <span className="text-white/20">/</span> 4
               </span>
@@ -415,7 +397,6 @@ const App: React.FC = () => {
                <div className="w-full max-w-xs md:max-w-md h-1.5 bg-white/5 rounded-full overflow-hidden mt-8">
                  <div className="h-full bg-white/50 animate-[progress_3s_linear]"></div>
                </div>
-               <p className="clean-font text-white/20 text-[10px] uppercase tracking-[0.3em] mt-4">Analog processing in darkroom</p>
             </div>
           )}
         </div>
@@ -423,33 +404,40 @@ const App: React.FC = () => {
 
       {state === BoothState.RESULT && (
         <div className="fixed bottom-0 left-0 w-full px-4 pb-12 pt-16 flex flex-col items-center gap-6 z-[300] animate-[slideUpUI_1.2s_ease-out_1.2s_both]">
-           <div className="flex flex-col sm:flex-row items-center gap-6 p-6 bg-black/85 backdrop-blur-[45px] border border-white/20 rounded-[3rem] shadow-[0_-30px_150px_rgba(0,0,0,1)] ring-1 ring-white/10">
-              <button 
-                disabled={isDownloading !== null}
-                onClick={() => { if(finalImage) triggerDownload(finalImage, `photo-${Date.now()}.png`, 'image'); }} 
-                className="w-full sm:w-auto bg-white text-black px-10 py-5 rounded-full flex items-center justify-center gap-3 transition-all active:scale-95 shadow-[0_15px_45px_rgba(255,255,255,0.25)] disabled:opacity-50"
-              >
-                {isDownloading === 'image' ? <Loader2 size={28} className="animate-spin" /> : <Download size={28} />}
-                <span className="elegant-font text-[18px] font-bold uppercase tracking-widest">
-                  {isDownloading === 'image' ? 'Saving...' : 'Save Memory'}
-                </span>
-              </button>
+           <div className="flex flex-col items-center gap-4 md:gap-6 p-4 md:p-6 bg-black/85 backdrop-blur-[45px] border border-white/20 rounded-[2rem] md:rounded-[3rem] shadow-[0_-30px_150px_rgba(0,0,0,1)] ring-1 ring-white/10 w-full max-w-lg mx-auto">
               
-              {recordedVideoUrl && (
+              <div className="w-full flex flex-col sm:flex-row gap-3">
                 <button 
                   disabled={isDownloading !== null}
-                  onClick={() => { if(recordedVideoUrl) triggerDownload(recordedVideoUrl, `video-${Date.now()}.mp4`, 'video'); }} 
-                  className="w-full sm:w-auto bg-white/10 text-white px-10 py-5 rounded-full flex items-center justify-center gap-3 border border-white/20 transition-all active:scale-95 disabled:opacity-50"
+                  onClick={() => { if(finalImage) triggerDownload(finalImage, `photo-${Date.now()}.png`, 'image'); }} 
+                  className="flex-1 bg-white text-black h-14 md:h-16 rounded-full flex items-center justify-center gap-3 transition-all active:scale-95 shadow-[0_15px_45px_rgba(255,255,255,0.25)] disabled:opacity-50"
                 >
-                  {isDownloading === 'video' ? <Loader2 size={28} className="animate-spin text-red-500" /> : <Video size={28} className="text-red-500" />}
-                  <span className="elegant-font text-[18px] font-bold uppercase tracking-widest">
-                    {isDownloading === 'video' ? 'Saving...' : 'Animated'}
+                  {isDownloading === 'image' ? <Loader2 size={24} className="animate-spin" /> : <Download size={24} />}
+                  <span className="elegant-font text-sm md:text-lg font-bold uppercase tracking-widest">
+                    {isDownloading === 'image' ? 'Saving...' : 'Save Strip'}
                   </span>
                 </button>
-              )}
+                
+                {recordedVideoUrl && (
+                  <button 
+                    disabled={isDownloading !== null}
+                    onClick={() => { if(recordedVideoUrl) triggerDownload(recordedVideoUrl, `video-${Date.now()}.mp4`, 'video'); }} 
+                    className="flex-1 bg-white/10 text-white h-14 md:h-16 rounded-full flex items-center justify-center gap-3 border border-white/20 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isDownloading === 'video' ? <Loader2 size={24} className="animate-spin text-red-500" /> : <Video size={24} className="text-red-500" />}
+                    <span className="elegant-font text-sm md:text-lg font-bold uppercase tracking-widest">
+                      {isDownloading === 'video' ? 'Saving...' : 'Save Video'}
+                    </span>
+                  </button>
+                )}
+              </div>
               
-              <button onClick={resetBooth} className="bg-white/5 text-white p-6 rounded-full border border-white/10 hover:rotate-180 transition-all">
-                <RefreshCw size={32} />
+              <button 
+                onClick={resetBooth} 
+                className="w-full bg-red-600/10 hover:bg-red-600/20 text-red-500 h-12 rounded-full border border-red-500/20 transition-all flex items-center justify-center gap-2"
+              >
+                <RefreshCw size={20} />
+                <span className="clean-font text-xs font-bold uppercase tracking-widest">New Session</span>
               </button>
            </div>
         </div>
@@ -459,7 +447,7 @@ const App: React.FC = () => {
         @keyframes centerPhysicalDrop {
           0% { transform: translateY(-120vh); opacity: 0; }
           10% { opacity: 1; }
-          100% { transform: translateY(8vh) rotate(-4deg); opacity: 1; }
+          100% { transform: translateY(5vh) rotate(-4deg); opacity: 1; }
         }
         @keyframes slideUpUI { from { transform: translateY(300px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes zoomIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
