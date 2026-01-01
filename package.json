@@ -2,20 +2,22 @@
 {
   "name": "berlin-retro-photo-booth",
   "version": "1.0.0",
-  "description": "An immersive 80s-90s style photo booth experience with mechanical curtain animations and analog processing.",
   "type": "module",
   "scripts": {
-    "build": "echo 'Static ESM project - no build required.'",
-    "dev": "npx serve .",
-    "start": "npx serve ."
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
-  "keywords": [
-    "retro",
-    "photo-booth",
-    "react",
-    "berlin",
-    "analog"
-  ],
-  "author": "",
-  "license": "MIT"
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "lucide-react": "^0.460.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "vite": "^6.0.0",
+    "typescript": "^5.7.0"
+  }
 }
