@@ -101,20 +101,20 @@ const App: React.FC = () => {
   const handleEnterBooth = async () => {
     triggerHaptic(20);
 
-    // 關鍵修正：先播放布簾音效，再預熱其他音效，避免中斷
     if (curtainSoundRef.current) {
       playSFX(curtainSoundRef.current, 0.8);
     }
 
-    // 在稍微延遲後預熱其他音效，確保行動裝置不會因為同時處理多個 Play 而靜音
+    // 預熱其他音效（靜音模式）
     setTimeout(() => {
       [shutterSoundRef.current, printSoundRef.current].forEach(sfx => {
         if (sfx) {
+          const originalVolume = sfx.volume;
           sfx.volume = 0;
           sfx.play().then(() => {
             sfx.pause();
             sfx.currentTime = 0;
-            sfx.volume = 1;
+            sfx.volume = originalVolume || 1;
           }).catch(() => {});
         }
       });
@@ -144,12 +144,16 @@ const App: React.FC = () => {
   const startShootingSequence = async () => {
     if (!streamRef.current) return;
     
-    // 使用者點擊時再次觸發音效物件「啟動」
+    // 關鍵修正：在 Start Session 點擊瞬間再次進行「靜音授權」
+    // 確保倒數結束後的 play() 不會被瀏覽器阻擋
     if (shutterSoundRef.current) {
       const sfx = shutterSoundRef.current;
+      const prevVol = sfx.volume;
+      sfx.volume = 0; // 靜音
       sfx.play().then(() => {
         sfx.pause();
         sfx.currentTime = 0;
+        sfx.volume = prevVol || 0.9; // 恢復正常音量
       }).catch(() => {});
     }
 
@@ -183,9 +187,12 @@ const App: React.FC = () => {
         }
         
         setState(BoothState.SHUTTER);
+        
+        // 觸發快門音效：此時已經過靜音授權，可以播放
         if (shutterSoundRef.current) {
            shutterSoundRef.current.currentTime = 0;
-           shutterSoundRef.current.play().catch(() => {});
+           shutterSoundRef.current.volume = 0.9;
+           shutterSoundRef.current.play().catch(e => console.warn("Shutter failed in sequence:", e));
         }
 
         setIsFlashActive(true);
